@@ -1,0 +1,8 @@
+# Ignore compiled python files
+*.pyc
+
+# Ignore any APK's used for testing
+*.apk
+
+# Ignore .swp recovery files
+*.swp
