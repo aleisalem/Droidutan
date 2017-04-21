@@ -112,7 +112,7 @@ def extractAppComponents(apk):
 
     return components
 
-def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntrospy=False):
+def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntrospy=False, preExtractedComponents={}):
     """
     Use AndroidViewClient to test an app
     :param apkPath: The path to the APK to test
@@ -125,13 +125,20 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
     :type logTestcase: bool
     :param useIntrospy: Whether to configure Introspy to monitor the API calls of the app under test
     :type useIntrospy: bool
+    :param preExtractedComponents: A dictionary of pre-extracted app components e.g. in case analyzeAPK and extractComponents have been already used to analyze the app.
+    :type preExtractedComponents: dict
     :return: A bool indicating the success/failure of the test
     """
     try:
         # 0. Analyze app and extract its components
-        prettyPrint("Analyzing app using \"androguard\"", "debug")
-        apk, dx, vm = analyzeAPK(apkPath)
-        appComponents = extractAppComponents(apk)
+        if len(preExtractedComponents) > 0:
+            prettyPrint("Using a pre-extracted dictionary of app components", "debug")
+            appComponents = preExtractedComponents
+        else:
+            prettyPrint("Analyzing app using \"androguard\"", "debug")
+            apk, dx, vm = analyzeAPK(apkPath)
+            appComponents = extractAppComponents(apk)
+
         if len(appComponents) < 1:
             prettyPrint("Could not extract components from \"%s\"" % apkPath, "error")
             return False
