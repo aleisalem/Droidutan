@@ -221,8 +221,9 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
             
             elif currentAction == "broadcast":
                 # Broadcast an intent
+                prettyPrint("Broadcasting an intent", "debug")
                 numFilters = len(appComponents["intent_filters"])
-                if numFilters < 1:
+                if numFilters < 2: # i.e. apart from the main activity's
                     prettyPrint("No intent filters found to broadcast intents. Skipping", "warning")
                 else:
                     targetFilter = appComponents["intent_filters"][random.randint(0, numFilters-1)]
