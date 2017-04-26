@@ -41,6 +41,29 @@ def _appCrashed(vc):
    
     return False
 
+def _appStopped(vc, appComponents):
+    """
+    Checks whether the app under test has been stopped/sent to the background
+    :param vc: A handle to the ViewClient instance
+    :type vc: com.dtmilano.android.viewclient.ViewClient
+    :return: A boolean indiciating whether the app has been stopped (True) or not (False)
+    """
+    try:
+        topLevelActivity = vc.device.getTopActivityName()
+        # Check whether the top-level activity is the launcher's
+        if topLevelActivity.lower().find("com.android.launcher") != -1:
+            return True 
+        # Check if the current activity belongs to any of the app's extracted activities
+        if topLevelActivity.lower().find(appComponents["package_name"]) == -1:
+            return True
+
+    except Exception as e:
+        prettyPrintError(e)
+        return True
+
+    return False
+
+
 def analyzeAPK(apkPath):
     """
     Uses Androguard to analyze an APK and retrieve the app's components
@@ -99,6 +122,8 @@ def extractAppComponents(apk):
        components["package_name"] = apk.package
        # Get the main activity
        components["main_activity"] = apk.get_main_activity()
+       # Get activities
+       components["activities"] = apk.get_activities()
        # Get (action android:name) of intent filters
        components["intent_filters"] = apk.get_elements("action", "name")
        # Get services
@@ -146,9 +171,9 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
         # 1. Connect to the virtual device
         prettyPrint("Connecting to device", "debug")
         if avdSerialno != "":
-            vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, serialno=avdSerialno))
+            vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, verbose=True, serialno=avdSerialno))
         else:
-            vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True))
+            vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, verbose=True))
         # 2. Install package and configure Introspy (if requested)
         prettyPrint("Installing package \"%s\"" % apkPath, "debug")
         #vc.installPackage(apkPath) # No parameter to specify device (no support for simultaneous instances) => Extend AndroidViewClient
@@ -261,11 +286,16 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
                     prettyPrint("Pressing \"%s\"" % selectedKeyCode, "debug")
                     vc.device.press(selectedKeyCode)
 
-            # 4.2. Check whether the performed action crashed the app
+            # 4.2. Check whether the performed action crashed or stopped (sent to background) the app
             if _appCrashed(vc):
                 prettyPrint("The previous action(s) caused the app to crash. Restarting", "warning")
                 vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
-                time.sleep(0.5) # Give time for the main activity to start
+                time.sleep(1) # Give time for the main activity to start
+            elif _appStopped(vc, appComponents):
+                prettyPrint("The previous action(s) stopped the app. Restarting", "warning")
+                vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
+                time.sleep(1) # Give time for the main activity to start
+
 
             # 4.3. Update the currentTime
             currentTime = time.time()
