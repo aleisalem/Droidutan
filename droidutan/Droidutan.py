@@ -137,7 +137,7 @@ def extractAppComponents(apk):
 
     return components
 
-def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntrospy=False, preExtractedComponents={}):
+def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntrospy=False, preExtractedComponents={}, allowCrashes=False):
     """
     Use AndroidViewClient to test an app
     :param apkPath: The path to the APK to test
@@ -152,6 +152,8 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
     :type useIntrospy: bool
     :param preExtractedComponents: A dictionary of pre-extracted app components e.g. in case analyzeAPK and extractComponents have been already used to analyze the app.
     :type preExtractedComponents: dict
+    :param allowCrashes: Whether to allow the app under test to crash. If (by default) False, the app will be re-started and re-tested.
+    :type allowCrashes: bool
     :return: A bool indicating the success/failure of the test
     """
     try:
@@ -289,6 +291,8 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
             # 4.2. Check whether the performed action crashed or stopped (sent to background) the app
             if _appCrashed(vc):
                 prettyPrint("The previous action(s) caused the app to crash. Restarting", "warning")
+                if allowCrashes:
+                    return False
                 vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
                 time.sleep(1) # Give time for the main activity to start
             elif _appStopped(vc, appComponents):
