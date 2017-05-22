@@ -290,9 +290,10 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
 
             # 4.2. Check whether the performed action crashed or stopped (sent to background) the app
             if _appCrashed(vc):
-                prettyPrint("The previous action(s) caused the app to crash. Restarting", "warning")
                 if not allowCrashes:
+                    prettyPrint("The previous action(s) caused the app to crash. Exiting", "warning")
                     return False
+                prettyPrint("The previous action(s) caused the app to crash. Restarting", "warning")
                 vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
                 time.sleep(1) # Give time for the main activity to start
             elif _appStopped(vc, appComponents):
