@@ -78,9 +78,12 @@ def analyzeAPK(apkPath):
         else:
             analysisSession = Session()
             analysisSession.add(apkPath, open(apkPath).read())
-            apk = analysisSession.analyzed_apk.values()[0]
-            dx = analysisSession.analyzed_dex.values()[0][0]
-            vm = analysisSession.analyzed_dex.values()[0][1]
+            if type(analysisSession.analyzed_apk.values()) == list:
+                # Androguard 2.0
+                apk = analysisSession.analyzed_apk.values()[0][0]
+            else:
+                apk = analysisSession.analyzed_apk.values()[0]
+            dx, vm = analysisSession.analyzed_dex.values()[0], analysisSession.analyzed_dex.values()[0]
 
     except Exception as e:
         prettyPrintError(e)
