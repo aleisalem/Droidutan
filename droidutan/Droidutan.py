@@ -295,11 +295,11 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
                     return False
                 prettyPrint("The previous action(s) caused the app to crash. Restarting", "warning")
                 vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
-                time.sleep(1) # Give time for the main activity to start
+                #time.sleep(1) # Give time for the main activity to start
             elif _appStopped(vc, appComponents):
                 prettyPrint("The previous action(s) stopped the app. Restarting", "warning")
                 vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
-                time.sleep(1) # Give time for the main activity to start
+                #time.sleep(1) # Give time for the main activity to start
 
 
             # 4.3. Update the currentTime
