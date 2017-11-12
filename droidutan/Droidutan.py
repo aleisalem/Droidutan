@@ -78,6 +78,9 @@ def analyzeAPK(apkPath):
         else:
             analysisSession = Session()
             analysisSession.add(apkPath, open(apkPath).read())
+            if len(analysisSession.analyzed_apk.values()) < 1:
+                prettyPrint("Could not retrieve an APK object", "warning")
+                return None, None, None
             if type(analysisSession.analyzed_apk.values()[0]) == list:
                 # Androguard 2.0
                 apk = analysisSession.analyzed_apk.values()[0][0]
