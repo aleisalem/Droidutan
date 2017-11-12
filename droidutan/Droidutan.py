@@ -78,7 +78,7 @@ def analyzeAPK(apkPath):
         else:
             analysisSession = Session()
             analysisSession.add(apkPath, open(apkPath).read())
-            if type(analysisSession.analyzed_apk.values()) == list:
+            if type(analysisSession.analyzed_apk.values()[0]) == list:
                 # Androguard 2.0
                 apk = analysisSession.analyzed_apk.values()[0][0]
             else:
