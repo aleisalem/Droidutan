@@ -185,9 +185,12 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
             currentAction = ["gui", "broadcast", "misc"][random.randint(0, 2)]
             if currentAction == "gui":
                 # Retrieve the UI elements of the current view and interact with them
-                prettyPrint("Retrieving UI elements on the screen", "debug")
+                prettyPrint("Retrieving clickable UI elements on the screen", "debug")
                 uiElements = [e for e in vc.dump() if e.isClickable()]
                 # Select a random element and interact with it
+                if len(uiElements) < 1:
+                    prettyPrint("No clickable UI elements found on the screen. Skipping", "warning")
+                    continue
                 element = uiElements[random.randint(0, len(uiElements)-1)]
                 # Get the element's class
                 eClass = element.getClass().split('.')[-1]
@@ -247,7 +250,7 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
                         targetFilter = appComponents["intent_filters"][random.randint(0, numFilters-1)]
                     prettyPrint("Broadcasting intent action: %s" % targetFilter, "debug")
                     vc.device.shell("am broadcast -a %s" % targetFilter)
-                    testEvents.append(str(BroadcastEvent(element.getId(), "broadcast", targetFilter)))
+                    testEvents.append(str(BroadcastEvent("none", "broadcast", targetFilter)))
                     
             elif currentAction == "misc":
                 # Perform a miscellaneous action
