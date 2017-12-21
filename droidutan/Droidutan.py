@@ -81,38 +81,21 @@ def analyzeAPK(apkPath):
             if len(analysisSession.analyzed_apk.values()) < 1:
                 prettyPrint("Could not retrieve an APK object", "warning")
                 return None, None, None
-            if type(analysisSession.analyzed_apk.values()[0]) == list:
-                # Androguard 2.0
-                apk = analysisSession.analyzed_apk.values()[0][0]
-            else:
-                apk = analysisSession.analyzed_apk.values()[0]
-            dx, vm = analysisSession.analyzed_dex.values()[0], analysisSession.analyzed_dex.values()[0]
+            if len(analysisSession.analyzed_apk.values()) > 0:
+                if type(analysisSession.analyzed_apk.values()[0]) == list:
+                    # Androguard 2.0
+                    apk = analysisSession.analyzed_apk.values()[0][0]
+                else:
+                    apk = analysisSession.analyzed_apk.values()[0]
+
+            if len(analysisSession.analyzed_dex.values()) > 1:
+                dx, vm = analysisSession.analyzed_dex.values()[0], analysisSession.analyzed_dex.values()[0]
 
     except Exception as e:
         prettyPrintError(e)
         return None, None, None
 
     return apk, dx, vm
-
-def configureIntrospy(vc, packageName):
-    """
-    Configure Introspy to log API calls issued by the APK during testing
-    :param vc: A handle to the ViewClient instance
-    :type vc: com.dtmilano.android.viewclient.ViewClient
-    :param packageName: The name of the package under test e.g. com.X.Y
-    :type ackageName: str
-    :return: A boolean depicting the success/failure of the operation
-    """
-    try:
-        # Configure Introspy
-        vc.device.shell("echo 'GENERAL CRYPTO,KEY,HASH,FS,IPC,PREF,URI,WEBVIEW,SSL' > /data/data/%s/introspy.config" % packageName)
-        vc.device.shell("chmod 664 /data/data/%s/introspy.config" % packageName)
-
-    except Exception as e:
-        prettyPrintError(e)
-        return False
-
-    return True
 
 def extractAppComponents(apk):
     """
@@ -143,7 +126,7 @@ def extractAppComponents(apk):
 
     return components
 
-def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntrospy=False, preExtractedComponents={}, allowCrashes=False):
+def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtractedComponents={}, allowCrashes=False, uninstallApp=True):
     """
     Use AndroidViewClient to test an app
     :param apkPath: The path to the APK to test
@@ -154,12 +137,12 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
     :type testDuration: int
     :param logTestcase: Log the AndroidViewClient commands issued to the target AVD during the test
     :type logTestcase: bool
-    :param useIntrospy: Whether to configure Introspy to monitor the API calls of the app under test
-    :type useIntrospy: bool
     :param preExtractedComponents: A dictionary of pre-extracted app components e.g. in case analyzeAPK and extractComponents have been already used to analyze the app.
     :type preExtractedComponents: dict
     :param allowCrashes: Whether to allow the app under test to crash. If (by default) False, the app will be re-started and re-tested.
     :type allowCrashes: bool
+    :param uninstallApp: Whether to uninstall the app under test before returning
+    :type uninstallApp: bool
     :return: A bool indicating the success/failure of the test
     """
     try:
@@ -170,6 +153,10 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
         else:
             prettyPrint("Analyzing app using \"androguard\"", "debug")
             apk, dx, vm = analyzeAPK(apkPath)
+            if not apk:
+                prettyPrint("Unable to retrieve an androguard.core.bytecodes.apk.APK object from app. Exiting", "error")
+                return False
+            # Retrieve app components (i.e., activities, services, receivers, etc.)
             appComponents = extractAppComponents(apk)
 
         if len(appComponents) < 1:
@@ -184,15 +171,12 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
             vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, verbose=True))
         # 2. Install package and configure Introspy (if requested)
         prettyPrint("Installing package \"%s\"" % apkPath, "debug")
-        #vc.installPackage(apkPath) # No parameter to specify device (no support for simultaneous instances) => Extend AndroidViewClient
         subprocess.call([vc.adb, "-s", avdSerialno, "install", "-r", apkPath]) 
-        if useIntrospy:
-            prettyPrint("Configuring \"Introspy\" before testing", "debug")
-            if not configureIntrospy(vc, appComponents["package_name"]):
-                prettyPrint("Configure \"Introspy\" failed. Proceeding with test", "warning")
         # 3. Start app via main activity
         prettyPrint("Starting app", "debug")
+        testEvents = []
         vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
+        testEvents.append(str(Event("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]), "activity")))
         # 4. Loop for the [testDuration] seconds and randomly perform the actions
         startTime = time.time() # Record start time
         currentTime = startTime
@@ -202,7 +186,7 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
             if currentAction == "gui":
                 # Retrieve the UI elements of the current view and interact with them
                 prettyPrint("Retrieving UI elements on the screen", "debug")
-                uiElements = vc.dump()
+                uiElements = [e for e in vc.dump() if e.isClickable()]
                 # Select a random element and interact with it
                 element = uiElements[random.randint(0, len(uiElements)-1)]
                 # Get the element's class
@@ -215,42 +199,40 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
 
                 # We tried 10 times and still could not get a supported element. Maybe it is a dummy activity with no interactive elements?
                 if attempt == 10 and eClass not in supportedUIElements:
-                    vc.device.press("KEYCODE_BACK") # Navigate back
+                    vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))  # Restart from main activity
+                    testEvents.append(str(Event("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]), "activity")))
                     continue
 
                 if eClass == "CheckBox":
-                    X, Y = element.getXY()
+                    X, Y = element.getCenter()
                     prettyPrint("Checking a checkbox at (%s,%s)" % (X, Y), "debug")
                     vc.touch(X, Y)
+                    testEvents.append(str(GUIEvent(element.getId(), "CheckBox", X, Y)))
                 elif eClass == "EditText":
-                    text = getRandomString(random.randint(0, 50))
+                    text = getRandomString(random.randint(0, 10))
                     prettyPrint("Writing random text to EditText: %s" % element.getId(), "debug")
                     element.setText(text)
+                    testEvents.append(str(TextEvent(element.getId(), "EditText", X, Y, text)))
                 elif eClass == "RadioButton":
-                    X, Y = element.getXY()
+                    X, Y = element.getCenter()
                     prettyPrint("Toggling a radiobutton at (%s,%s)" % (X, Y), "debug")
                     vc.touch(X, Y)
-                elif eClass == "RatingBar":
-                    X, Y = element.getXY()
-                    barWidth = element.getWidth()
-                    ratingX = random.randint(0, barWidth-1)
-                    prettyPrint("Touching a rating bar at (%s, %s)" % (X+ratingX, Y), "debug")
-                    vc.touch(X+ratingX, Y)
+                    testEvents.append(str(GUIEvent(element.getId(), "RadioButton", X, Y)))
                 elif eClass == "Switch":
-                    if element.isClickable:
-                        X, Y = element.getXY()
-                        prettyPrint("Flipping a switch at (%s,%s)" % (X, Y), "debug")
-                        vc.touch(X, Y)
+                    X, Y = element.getCenter()
+                    prettyPrint("Flipping a switch at (%s,%s)" % (X, Y), "debug")
+                    vc.touch(X, Y)
+                    testEvents.append(str(GUIEvent(element.getId(), "Switch", X, Y)))
                 elif eClass == "ToggleButon":
-                    if element.isClickable:
-                        X, Y = element.getXY()
-                        prettyPrint("Toggling a button at (%s,%s)" % (X, Y), "debug")
-                        vc.touch(X, Y)
+                    X, Y = element.getCenter()
+                    prettyPrint("Toggling a button at (%s,%s)" % (X, Y), "debug")
+                    vc.touch(X, Y)
+                    testEvents.append(str(GUIEvent(element.getId(), "ToggleButton", X, Y)))
                 elif eClass == "Button":
-                    if element.isClickable:
-                        X, Y = element.getXY()
-                        prettyPrint("Tapping a button at (%s,%s)" % (X, Y), "debug")
-                        vc.touch(X, Y)
+                    X, Y = element.getCenter()
+                    prettyPrint("Tapping a button at (%s,%s)" % (X, Y), "debug")
+                    vc.touch(X, Y)
+                    testEvents.append(str(GUIEvent(element.getId(), "Button", X, Y)))
             
             elif currentAction == "broadcast":
                 # Broadcast an intent
@@ -265,6 +247,7 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
                         targetFilter = appComponents["intent_filters"][random.randint(0, numFilters-1)]
                     prettyPrint("Broadcasting intent action: %s" % targetFilter, "debug")
                     vc.device.shell("am broadcast -a %s" % targetFilter)
+                    testEvents.append(str(BroadcastEvent(element.getId(), "broadcast", targetFilter)))
                     
             elif currentAction == "misc":
                 # Perform a miscellaneous action
@@ -278,9 +261,11 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
                     if touchType == "normal":
                         prettyPrint("Touching screen at (%s,%s)" % (X, Y), "debug")
                         vc.touch(X, Y)
+                        testEvents.append(str(GUIEvent("none", "touch", X, Y)))
                     else:
                         prettyPrint("Long touch screen at (%s,%s)" % (X, Y), "debug")
                         vc.longTouch(X, Y)
+                        testEvents.append(str(GUIEvent("none", "longtouch", X, Y)))
                 # Swipe screen left/right
                 elif selectedAction.find("swipe") != -1:
                     startX, startY = random.randint(0, maxWidth), random.randint(0, maxHeight)
@@ -288,12 +273,13 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
                     endX = maxWidth if selectedAction == "swipeleft" else -maxWidth
                     prettyPrint("Swiping screen from (%s,%s) to (%s,%s)" % (startX, startY, endX, endY), "debug")
                     vc.swipe(startX, startY, endX, endY)
+                    testEvents.append(str(SwipeEvent("none", selectedAction, startX, startY, endX, endY)))
                 # Press a random button
                 elif selectedAction == "press":
                     selectedKeyCode = selectedKeyEvents[random.randint(0, len(selectedKeyEvents)-1)]
                     prettyPrint("Pressing \"%s\"" % selectedKeyCode, "debug")
                     vc.device.press(selectedKeyCode)
-
+                    testEvents.append(str(PressEvent("none", "press", selectedKeyCode)))
             # 4.2. Check whether the performed action crashed or stopped (sent to background) the app
             if _appCrashed(vc):
                 if not allowCrashes:
@@ -301,15 +287,36 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, useIntr
                     return False
                 prettyPrint("The previous action(s) caused the app to crash. Restarting", "warning")
                 vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
+                testEvents.append(str(Event("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]), "activity")))
                 #time.sleep(1) # Give time for the main activity to start
             elif _appStopped(vc, appComponents):
                 prettyPrint("The previous action(s) stopped the app. Restarting", "warning")
                 vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
+                testEvents.append(str(Event("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]), "activity")))
                 #time.sleep(1) # Give time for the main activity to start
 
 
             # 4.3. Update the currentTime
             currentTime = time.time()
+        
+        # 5. Save the test events, if requested
+        if logTestcase:
+            prettyPrint("Saving events to file")
+            testcaseFile = open("%s_%s.testcase" % (appComponents["package_name"].replace('.','_'), str(int(time.time()))), "w")
+            testcaseFile.write("{\n    \"events\":[\n")
+            for e in range(len(testEvents)):
+               if e == len(testEvents)-1:
+                   testcaseFile.write("\t%s\n" % testEvents[e])
+               else:
+                   testcaseFile.write("\t%s,\n" % testEvents[e])
+            testcaseFile.write("    ]\n}")
+            testcaseFile.close()
+
+        # 6. Uninstalling app under test
+        if uninstallApp:
+            prettyPrint("Uninstalling app \"%s\"" % appComponents["package_name"])
+            subprocess.call([vc.adb, "-s", avdSerialno, "uninstall", appComponents["package_name"]])
+
 
     except Exception as e:
         prettyPrintError(e)
