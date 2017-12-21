@@ -51,6 +51,8 @@ def _appStopped(vc, appComponents):
     try:
         topLevelActivity = vc.device.getTopActivityName()
         # Check whether the top-level activity is the launcher's
+        if not topLevelActivity:
+            return True
         if topLevelActivity.lower().find("com.android.launcher") != -1:
             return True 
         # Check if the current activity belongs to any of the app's extracted activities
