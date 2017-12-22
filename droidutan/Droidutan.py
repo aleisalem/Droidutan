@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 # Python modules
-import os, glob, sys, time, subprocess
+import os, glob, sys, time, subprocess, exceptions
 # Droidutan utils
 from Graphics import *
 from Common import *
@@ -33,7 +33,10 @@ def _appCrashed(vc):
                     # Tap the "OK" button and return True to indicate crash
                     vc.findViewWithText("OK").touch()
                     return True
-                
+        
+    except exceptions.RuntimeError as rte:
+        prettyPrint("UI Dump did not return anything. Assuming crash", "warning")
+        return True
     except Exception as e:
         prettyPrintError(e)
         # Assume that the app crashed (better safe than sorry)
@@ -177,7 +180,19 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
         # 3. Start app via main activity
         prettyPrint("Starting app", "debug")
         testEvents = []
-        vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
+        try:
+            vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
+        except exceptions.RuntimeError as rte:
+            if len(appComponents["activities"]) > 1:
+                randomActivity = appComponents["activities"][random.randint(0, len(appComponents["activities"])-1)]
+                while randomActivity == appComponents["main_activity"]:
+                    randomActivity = appComponents["activities"][random.randint(0, len(appComponents["activities"])-1)]
+                prettyPrint("Unable to start main activity. Launching \"%s\" instead" % randomActivity, "warning")
+                vc.device.startActivity("%s/%s" % (appComponents["package_name"], randomActivity))     
+            else:
+                prettyPrint("Unable to start main activity. No other activities to launch", "error")
+                return False
+
         testEvents.append(str(Event("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]), "activity")))
         # 4. Loop for the [testDuration] seconds and randomly perform the actions
         startTime = time.time() # Record start time
@@ -188,7 +203,13 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
             if currentAction == "gui":
                 # Retrieve the UI elements of the current view and interact with them
                 prettyPrint("Retrieving clickable UI elements on the screen", "debug")
-                uiElements = [e for e in vc.dump() if e.isClickable()]
+                try:
+                    uiDump = vc.dump()
+                except exceptions.RuntimeError:
+                    prettyPrint("Nothing returned from the UI dump. Skipping UI action", "warning")
+                    continue
+                # Retrieve clickable UI elements
+                uiElements = [e for e in uiDump if e.isClickable()]
                 # Select a random element and interact with it
                 if len(uiElements) < 1:
                     prettyPrint("No clickable UI elements found on the screen. Skipping", "warning")
@@ -217,7 +238,7 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
                     text = getRandomString(random.randint(0, 10))
                     prettyPrint("Writing random text to EditText: %s" % element.getId(), "debug")
                     element.setText(text)
-                    testEvents.append(str(TextEvent(element.getId(), "EditText", X, Y, text)))
+                    testEvents.append(str(TextEvent(element.getId(), "EditText", text)))
                 elif eClass == "RadioButton":
                     X, Y = element.getCenter()
                     prettyPrint("Toggling a radiobutton at (%s,%s)" % (X, Y), "debug")
@@ -256,7 +277,8 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
                     
             elif currentAction == "misc":
                 # Perform a miscellaneous action
-                maxWidth, maxHeight = vc.display["width"], vc.display["height"]
+                maxWidth = vc.display["width"] if "width" in vc.display.keys() else 768
+                maxHeight =  vc.display["height"] if "height" in vc.display.keys() else 1280
                 actions = ["touch", "swipeleft", "swiperight", "press"]
                 selectedAction = actions[random.randint(0, len(actions)-1)]
                 # Touch at random (X, Y)

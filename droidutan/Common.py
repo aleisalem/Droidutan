@@ -34,10 +34,10 @@ class GUIEvent(Event):
     def __str__(self):
         return "{\"id\": \"%s\", \"type\": \"%s\", \"x\": \"%s\", \"y\": \"%s\"}" % (self.eId, self.eType, self.eX, self.eY)
 
-class TextEvent(GUIEvent):
+class TextEvent(Event):
     """ A class for TextViews """
-    def __init__(self, eId, eType, eX, eY, eText):
-        super(TextEvent, self).__init__(eId, eType, eX, eY)
+    def __init__(self, eId, eType, eText):
+        super(TextEvent, self).__init__(eId, eType)
         self.eText = eText
 
     def __str__(self):
