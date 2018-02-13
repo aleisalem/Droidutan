@@ -41,7 +41,7 @@ class TextEvent(Event):
         self.eText = eText
 
     def __str__(self):
-        return "{\"id\": \"%s\", \"type\": \"%s\", \"x\": \"%s\", \"y\": \"%s\", \"text\": \"%s\"}" % (self.eId, self.eType, self.X, self.Y, self.eText)
+        return "{\"id\": \"%s\", \"type\": \"%s\", \"text\": \"%s\"}" % (self.eId, self.eType, self.eText)
 
 class SwipeEvent(GUIEvent):
     """ A class for swiping events """
