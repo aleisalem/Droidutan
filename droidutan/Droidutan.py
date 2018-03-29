@@ -18,15 +18,26 @@ except Exception as e:
     prettyPrint("Error encountered while importing \"AndroidViewClient\". Hint: Make sure that it is installed on your system", "error")
     exit(1)
    
-def _appCrashed(vc):
+def _appCrashed(vc, avdSerialno=""):
     """
     Checks whether the app under test has crashed via an exception message
     :param vc: A handle to the ViewClient instance
     :type vc: com.dtmilano.android.viewclient.ViewClient
+    :param avdSerialno: The serial number of the device to connect to (if needed)
+    :type avdSerialno: str
     :return: A boolean indicating whether the app has crashed (True) or not (False)
     """
     try:
-        uiElements = vc.dump()
+        try:
+            uiElements = vc.dump()
+        except exceptions.RuntimeError as rte:
+            prettyPrint("Empty ViewClient handle. Reconnecting", "warning")
+            vc = _connect(avdSerialno)
+            uiElements = vc.dump() # Try again?
+
+        if not uiElements or len(uiElements) < 1:
+            prettyPrint("Could not retrieve UI elements. Assuming NO crash", "warning")
+            return False
         for element in uiElements:
             if element.getClass().split('.')[-1] == "TextView":
                 if element.getText().lower().find("has stopped") != -1:
@@ -42,16 +53,25 @@ def _appCrashed(vc):
         # Assume that the app crashed (better safe than sorry)
         return True 
    
-    return False
+        return False
 
-def _appStopped(vc, appComponents):
+def _appStopped(vc, appComponents, avdSerialno=""):
     """
     Checks whether the app under test has been stopped/sent to the background
     :param vc: A handle to the ViewClient instance
     :type vc: com.dtmilano.android.viewclient.ViewClient
+    :param avdSerialno: The serial number of the device to connect to (if needed)
+    :type avdSerialno: str
     :return: A boolean indiciating whether the app has been stopped (True) or not (False)
     """
     try:
+        try:
+            uiElements = vc.dump()
+        except exceptions.RuntimeError as rte:
+            prettyPrint("Empty ViewClient handle. Reconnecting", "warning")
+            vc = _connect(avdSerialno)
+            uiElements = vc.dump() # Try again?
+
         topLevelActivity = vc.device.getTopActivityName()
         # Check whether the top-level activity is the launcher's
         if not topLevelActivity:
@@ -68,6 +88,24 @@ def _appStopped(vc, appComponents):
 
     return False
 
+def _connect(avdSerialno=""):
+    """
+    Connects to a device
+    :param avdSerialno: The serial number of the device to connect to
+    :type avdSerialno: str
+    :return: A com.dtmilano.android.viewclient.ViewClient object depicting a handle to the device
+    """
+    try:
+        if avdSerialno != "":
+            vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, verbose=True, serialno=avdSerialno))
+        else:
+            vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, verbose=True))
+
+    except Exception as e:
+        prettyPrintError(e)
+        return None
+    
+    return vc
 
 def analyzeAPK(apkPath):
     """
@@ -174,10 +212,7 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
 
         # 1. Connect to the virtual device
         prettyPrint("Connecting to device", "debug")
-        if avdSerialno != "":
-            vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, verbose=True, serialno=avdSerialno))
-        else:
-            vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, verbose=True))
+        vc = _connect(avdSerialno)
         # 2. Install package and configure Introspy (if requested)
         prettyPrint("Installing package \"%s\"" % apkPath, "debug")
         subprocess.call([vc.adb, "-s", avdSerialno, "install", "-r", apkPath]) 
