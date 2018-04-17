@@ -31,19 +31,23 @@ def _appCrashed(vc, avdSerialno=""):
         try:
             uiElements = vc.dump()
         except exceptions.RuntimeError as rte:
-            prettyPrint("Empty ViewClient handle. Reconnecting", "warning")
-            vc = _connect(avdSerialno)
-            uiElements = vc.dump() # Try again?
+            prettyPrint("Empty ViewClient handle. Reconnecting to \"%s\"" % avdSerialno, "warning")
+            vc.device.shell("input keyevent KEYCODE_HOME")
+            return True
 
         if not uiElements or len(uiElements) < 1:
             prettyPrint("Could not retrieve UI elements. Assuming NO crash", "warning")
             return False
         for element in uiElements:
             if element.getClass().split('.')[-1] == "TextView":
-                if element.getText().lower().find("has stopped") != -1:
-                    # Tap the "OK" button and return True to indicate crash
-                    vc.findViewWithText("OK").touch()
-                    return True
+                for keyword in ["has stopped", "unfortunately", "error", "could not"]:
+                    if element.getText().lower().find(keyword) != -1:
+                        # Tap the "OK" button and return True to indicate crash
+                        if vc.findViewWithText("OK"):
+                            vc.findViewWithText("OK").touch()
+                        else:
+                            vc.device.shell("input keyevent KEYCODE_HOME")
+                        return True
         
     except exceptions.RuntimeError as rte:
         prettyPrint("UI Dump did not return anything. Assuming crash", "warning")
@@ -69,8 +73,8 @@ def _appStopped(vc, appComponents, avdSerialno=""):
             uiElements = vc.dump()
         except exceptions.RuntimeError as rte:
             prettyPrint("Empty ViewClient handle. Reconnecting", "warning")
-            vc = _connect(avdSerialno)
-            uiElements = vc.dump() # Try again?
+            vc.device.shell("input keyevent KEYCODE_HOME") # Try navigating to home
+            return True
 
         topLevelActivity = vc.device.getTopActivityName()
         # Check whether the top-level activity is the launcher's
@@ -95,17 +99,22 @@ def _connect(avdSerialno=""):
     :type avdSerialno: str
     :return: A com.dtmilano.android.viewclient.ViewClient object depicting a handle to the device
     """
-    try:
-        if avdSerialno != "":
-            vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, verbose=True, serialno=avdSerialno))
-        else:
-            vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, verbose=True))
-
-    except Exception as e:
-        prettyPrintError(e)
-        return None
+    counter = 1
+    # Attempt connection up to 10 times
+    while counter <= 10:
+        try:
+            if avdSerialno != "":
+                vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, verbose=True, serialno=avdSerialno))
+            else:
+                vc = ViewClient(*ViewClient.connectToDeviceOrExit(ignoreversioncheck=True, verbose=True))
+        except Exception as e:
+            prettyPrintError(e)
+            if counter <= 10:
+                continue
+            else:
+                return None
     
-    return vc
+        return vc
 
 def analyzeAPK(apkPath):
     """
@@ -316,8 +325,9 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
                     
             elif currentAction == "misc":
                 # Perform a miscellaneous action
-                maxWidth = vc.display["width"] if "width" in vc.display.keys() else 768
-                maxHeight =  vc.display["height"] if "height" in vc.display.keys() else 1280
+                if type(vc.display) == dict:
+                    maxWidth = vc.display["width"] if "width" in vc.display.keys() else 768
+                    maxHeight =  vc.display["height"] if "height" in vc.display.keys() else 1280
                 actions = ["touch", "swipeleft", "swiperight", "press"]
                 selectedAction = actions[random.randint(0, len(actions)-1)]
                 # Touch at random (X, Y)
@@ -357,7 +367,7 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
                     snapshot.save("%s_%s.png" % (appComponents["package_name"], str(int(time.time()))))
 
             # 4.3. Check whether the performed action crashed or stopped (sent to background) the app
-            if _appCrashed(vc):
+            if _appCrashed(vc, avdSerialno):
                 if not allowCrashes:
                     prettyPrint("The previous action(s) caused the app to crash. Exiting", "warning")
                     return False
@@ -365,7 +375,7 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
                 vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
                 testEvents.append(str(Event("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]), "activity")))
                 time.sleep(waitInterval) # Give time for the main activity to start
-            elif _appStopped(vc, appComponents):
+            elif _appStopped(vc, appComponents, avdSerialno):
                 prettyPrint("The previous action(s) stopped the app. Restarting", "warning")
                 vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
                 testEvents.append(str(Event("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]), "activity")))
@@ -496,14 +506,17 @@ def testAppFromTestcase(apkPath, testCaseFile, avdSerialno="", waitInterval=1, t
                     snapshot.save("%s_%s.png" % (appComponents["package_name"], str(int(time.time()))))
 
             # 4.3. Check whether the performed action crashed or stopped (sent to background) the app
-            if _appCrashed(vc):
+            if _appCrashed(vc, avdSerialno):
                 if not allowCrashes:
                     prettyPrint("The previous action(s) caused the app to crash. Exiting", "warning")
+                    if uninstallApp:
+                        prettyPrint("Uninstalling app \"%s\"" % appComponents["package_name"])
+                        subprocess.call([vc.adb, "-s", avdSerialno, "uninstall", appComponents["package_name"]])
                     return False
                 prettyPrint("The previous action(s) caused the app to crash. Restarting", "warning")
                 vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
                 time.sleep(waitInterval) # Give time for the main activity to start
-            elif _appStopped(vc, appComponents):
+            elif _appStopped(vc, appComponents, avdSerialno):
                 prettyPrint("The previous action(s) stopped the app. Restarting", "warning")
                 vc.device.startActivity("%s/%s" % (appComponents["package_name"], appComponents["main_activity"]))
                 time.sleep(waitInterval) # Give time for the main activity to start
