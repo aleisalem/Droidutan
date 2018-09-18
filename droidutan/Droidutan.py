@@ -7,6 +7,7 @@ from Graphics import *
 from Common import *
 # Androguard
 try:
+    from androguard.misc import *
     from androguard.session import Session
 except Exception as e:
     prettyPrint("Error encountered while importing \"androguard\". Hint: Make sure that it is installed on your system", "error")
@@ -128,20 +129,20 @@ def analyzeAPK(apkPath):
         if not os.path.exists(apkPath):
             prettyPrint("Could not find \"%s\"" % apkPath, "warning")
         else:
-            analysisSession = Session()
-            analysisSession.add(apkPath, open(apkPath).read())
-            if len(analysisSession.analyzed_apk.values()) < 1:
-                prettyPrint("Could not retrieve an APK object", "warning")
-                return None, None, None
-            if len(analysisSession.analyzed_apk.values()) > 0:
-                if type(analysisSession.analyzed_apk.values()[0]) == list:
-                    # Androguard 2.0
-                    apk = analysisSession.analyzed_apk.values()[0][0]
-                else:
-                    apk = analysisSession.analyzed_apk.values()[0]
-
-            if len(analysisSession.analyzed_dex.values()) > 1:
-                dx, vm = analysisSession.analyzed_dex.values()[0], analysisSession.analyzed_dex.values()[0]
+            #analysisSession = Session()
+            #analysisSession.add(apkPath, open(apkPath).read())
+            #if len(analysisSession.analyzed_apk.values()) < 1:
+            #    prettyPrint("Could not retrieve an APK object", "warning")
+            #    return None, None, None
+            #if len(analysisSession.analyzed_apk.values()) > 0:
+            #    if type(analysisSession.analyzed_apk.values()[0]) == list:
+            #        # Androguard 2.0
+            #        apk = analysisSession.analyzed_apk.values()[0][0]
+            #    else:
+            #        apk = analysisSession.analyzed_apk.values()[0]
+            #if len(analysisSession.analyzed_dex.values()) > 1:
+            #    dx, vm = analysisSession.analyzed_dex.values()[0], analysisSession.analyzed_dex.values()[0]
+            apk, dx, vm = AnalyzeAPK(apkPath)
 
     except Exception as e:
         prettyPrintError(e)
@@ -165,12 +166,29 @@ def extractAppComponents(apk):
        components["main_activity"] = apk.get_main_activity()
        # Get activities
        components["activities"] = apk.get_activities()
-       # Get (action android:name) of intent filters
-       components["intent_filters"] = apk.get_elements("action", "name")
        # Get services
        components["services"] = apk.get_services()
+       # Get broadcast receivers
+       components["receivers"] = apk.get_receivers()
        # Get content providers
        components["content_providers"] = apk.get_providers()
+       # Get intent filters
+       components["intent_filters"] = []
+       for a in components["activities"]:
+           d = apk.get_intent_filters("activity", a)
+           if "action" in d.keys():
+               for i in d["action"]:
+                   components["intent_filters"].append(i)           
+       for s in components["services"]:
+           d = apk.get_intent_filters("service", s)
+           if "action" in d.keys():
+               for i in d["action"]:
+                   components["intent_filters"].append(i)
+       for r in components["receivers"]:
+           d = apk.get_intent_filters("receiver", r)
+           if "action" in d.keys():
+               for i in d["action"]:
+                   components["intent_filters"].append(i)
 
     except Exception as e:
         prettyPrintError(e)
@@ -311,6 +329,10 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
             elif currentAction == "broadcast":
                 # Broadcast an intent
                 prettyPrint("Broadcasting an intent", "debug")
+                if not "intent_filters" in appComponents.keys():
+                    prettyPrint("App does not have any intent filters. Skipping", "waning")
+                    continue
+
                 numFilters = len(appComponents["intent_filters"])
                 if numFilters < 2: # i.e. apart from the main activity's
                     prettyPrint("No intent filters found to broadcast intents. Skipping", "warning")
@@ -405,6 +427,9 @@ def testApp(apkPath, avdSerialno="", testDuration=60, logTestcase=False, preExtr
 
     except Exception as e:
         prettyPrintError(e)
+        if uninstallApp:
+            prettyPrint("Uninstalling app \"%s\"" % appComponents["package_name"])
+            subprocess.call([vc.adb, "-s", avdSerialno, "uninstall", appComponents["package_name"]])
         return False
 
     return True
